@@ -17,7 +17,7 @@
     <section class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 mb-8">
       <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
         <div class="md:col-span-12">
-          <label class="block text-sm font-bold text-slate-700 mb-2">URL 검색(선택)</label>
+          <label class="block text-sm font-bold text-slate-700 mb-2">URL 입력</label>
           <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
             <div class="md:col-span-9">
               <input id="filterUrl" type="text" placeholder="https://example.com/page"
@@ -30,7 +30,7 @@
               </label>
             </div>
           </div>
-          <p class="text-xs text-slate-500 mt-2">URL을 입력하면 해당 URL(또는 포함 매칭) 행만 분석합니다. 비워두면 전체를 분석합니다.</p>
+          <p class="text-xs text-slate-500 mt-2">엑셀 업로드 시: 해당 URL만 필터 분석. 엑셀 없이: 해당 URL의 메타태그(Title/Description)를 가져와 표시합니다.</p>
         </div>
 
         <div class="md:col-span-12 mt-1">
@@ -92,6 +92,26 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-lg font-extrabold text-slate-900">Meta Preview (URL)</h2>
+          <div id="metaSource" class="text-xs text-slate-500">-</div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="border border-slate-200 rounded-xl p-4 bg-slate-50">
+            <div class="text-xs font-bold text-slate-500">Title</div>
+            <div id="metaTitle" class="mt-2 text-sm font-semibold text-slate-900 break-words">-</div>
+            <div class="mt-2 text-xs text-slate-500">Length: <span id="metaTitleLen" class="font-bold text-slate-700">0</span></div>
+          </div>
+          <div class="border border-slate-200 rounded-xl p-4 bg-slate-50">
+            <div class="text-xs font-bold text-slate-500">Description</div>
+            <div id="metaDesc" class="mt-2 text-sm text-slate-800 break-words">-</div>
+            <div class="mt-2 text-xs text-slate-500">Length: <span id="metaDescLen" class="font-bold text-slate-700">0</span></div>
+          </div>
+        </div>
+        <p class="mt-3 text-xs text-slate-500">참고: 일부 사이트는 접근 제한/CORS/봇 차단으로 메타를 못 가져올 수 있습니다.</p>
       </div>
 
       <div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
@@ -223,6 +243,68 @@
       }
     }
 
+    function normalizeUrlInput(input) {
+      const raw = String(input || "").trim();
+      if (!raw) return "";
+      try {
+        const u = new URL(raw);
+        return u.toString();
+      } catch {
+        // If user typed domain without scheme, assume https
+        try {
+          const u = new URL(`https://${raw}`);
+          return u.toString();
+        } catch {
+          return raw;
+        }
+      }
+    }
+
+    function extractFirst(html, regex) {
+      const m = html.match(regex);
+      return m && m[1] ? m[1].trim() : "";
+    }
+
+    function decodeHtmlEntities(s) {
+      if (!s) return "";
+      const ta = document.createElement("textarea");
+      ta.innerHTML = s;
+      return ta.value;
+    }
+
+    async function fetchHtmlViaJina(url) {
+      // CORS-friendly fetch wrapper. Returns HTML-ish text.
+      // NOTE: This relies on a third-party service; if it fails, we show an error gracefully.
+      const target = normalizeUrlInput(url);
+      if (!target) throw new Error("URL을 입력해 주세요.");
+      const wrapped = `https://r.jina.ai/http://${target.replace(/^https?:\/\//, "")}`;
+      const res = await fetch(wrapped, { method: "GET" });
+      if (!res.ok) throw new Error(`메타 가져오기 실패 (HTTP ${res.status})`);
+      return await res.text();
+    }
+
+    function parseMetaFromHtml(html) {
+      // Best-effort regex parsing
+      const title = decodeHtmlEntities(extractFirst(html, /<title[^>]*>([\s\S]*?)<\/title>/i));
+
+      // meta description can be name="description" or property="og:description"
+      const desc1 = extractFirst(html, /<meta[^>]+name=["']description["'][^>]*content=["']([^"']*)["'][^>]*>/i);
+      const desc2 = extractFirst(html, /<meta[^>]+content=["']([^"']*)["'][^>]*name=["']description["'][^>]*>/i);
+      const og1 = extractFirst(html, /<meta[^>]+property=["']og:description["'][^>]*content=["']([^"']*)["'][^>]*>/i);
+      const og2 = extractFirst(html, /<meta[^>]+content=["']([^"']*)["'][^>]*property=["']og:description["'][^>]*>/i);
+
+      const description = decodeHtmlEntities(desc1 || desc2 || og1 || og2);
+      return { title, description };
+    }
+
+    function setMetaPreview({ source, title, description }) {
+      $("metaSource").textContent = source || "-";
+      $("metaTitle").textContent = title || "-";
+      $("metaDesc").textContent = description || "-";
+      $("metaTitleLen").textContent = String((title || "").length);
+      $("metaDescLen").textContent = String((description || "").length);
+    }
+
     function buildDemoRows() {
       const demo = [
         { Address: "https://example.com/", "Title 1": "Example Home", "H1-1": "Welcome" },
@@ -253,6 +335,7 @@
       $("titleDetail").textContent = "-";
       $("h1Detail").textContent = "-";
       $("issuesTable").innerHTML = "";
+      setMetaPreview({ source: "-", title: "", description: "" });
     });
 
     $("analyzeBtn").addEventListener("click", async () => {
@@ -260,6 +343,23 @@
 
       $("status").textContent = "분석 중...";
       try {
+        // If no Excel file is provided, try fetching the URL meta preview.
+        const inputUrl = normalizeUrlInput($("filterUrl").value);
+        if (!file && inputUrl) {
+          setMetaPreview({ source: "Fetching...", title: "", description: "" });
+          try {
+            const html = await fetchHtmlViaJina(inputUrl);
+            const meta = parseMetaFromHtml(html);
+            setMetaPreview({ source: "Live URL", title: meta.title, description: meta.description });
+          } catch (e) {
+            setMetaPreview({ source: "Failed", title: "", description: "" });
+          }
+        } else if (!file) {
+          setMetaPreview({ source: "Demo", title: "", description: "" });
+        } else {
+          setMetaPreview({ source: "Excel", title: "", description: "" });
+        }
+
         const allRows = file ? await parseExcel(file) : buildDemoRows();
         if (!allRows.length) throw new Error("엑셀에 데이터가 없습니다.");
 
