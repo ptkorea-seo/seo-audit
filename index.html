@@ -223,6 +223,22 @@
       }
     }
 
+    function buildDemoRows() {
+      const demo = [
+        { Address: "https://example.com/", "Title 1": "Example Home", "H1-1": "Welcome" },
+        { Address: "https://example.com/about", "Title 1": "About Example Company and What We Do (Long Title For Demo Purposes)", "H1-1": "About" },
+        { Address: "https://example.com/blog/seo", "Title 1": "SEO Audit Checklist 2026", "H1-1": "" },
+        { Address: "https://example.com/blog/geo", "Title 1": "GEO Optimization Guide: Structured Data + Entity Coverage", "H1-1": "GEO Guide" },
+        { Address: "https://example.com/contact", "Title 1": "Contact", "H1-1": null }
+      ];
+
+      // Provide Title 1 Length too, so it works even if user expects that column.
+      return demo.map(r => ({
+        ...r,
+        "Title 1 Length": (r["Title 1"] ? String(r["Title 1"]).length : 0)
+      }));
+    }
+
     $("resetBtn").addEventListener("click", () => {
       $("file").value = "";
       $("filterUrl").value = "";
@@ -241,11 +257,10 @@
 
     $("analyzeBtn").addEventListener("click", async () => {
       const file = $("file").files?.[0];
-      if (!file) return alert("엑셀 파일을 선택해 주세요.");
 
       $("status").textContent = "분석 중...";
       try {
-        const allRows = await parseExcel(file);
+        const allRows = file ? await parseExcel(file) : buildDemoRows();
         if (!allRows.length) throw new Error("엑셀에 데이터가 없습니다.");
 
         const row0 = allRows[0];
@@ -321,7 +336,7 @@
         $("status").textContent =
           filter
             ? `완료. URL 필터 적용됨(${exact ? "정확히 일치" : "포함"}): ${filter}`
-            : "완료. 전체 행 기준으로 계산했습니다.";
+            : (file ? "완료. 전체 행 기준으로 계산했습니다." : "완료. (데모 데이터) 전체 행 기준으로 계산했습니다. 엑셀을 업로드하면 실제 데이터로 분석합니다.");
       } catch (e) {
         $("dash").classList.add("hidden");
         $("status").textContent = "";
