@@ -15,20 +15,40 @@
     </header>
 
     <section class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 mb-8">
-      <div class="flex flex-col md:flex-row md:items-end gap-4">
-        <div class="flex-1">
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-3">
+        <div class="md:col-span-12">
+          <label class="block text-sm font-bold text-slate-700 mb-2">URL 검색(선택)</label>
+          <div class="grid grid-cols-1 md:grid-cols-12 gap-2">
+            <div class="md:col-span-9">
+              <input id="filterUrl" type="text" placeholder="https://example.com/page"
+                     class="w-full p-3 border rounded-xl bg-white focus:ring-2 focus:ring-indigo-500 outline-none" />
+            </div>
+            <div class="md:col-span-3">
+              <label class="h-full w-full flex items-center justify-center gap-2 p-3 border rounded-xl bg-slate-50 text-sm font-semibold text-slate-700 select-none">
+                <input id="filterExact" type="checkbox" class="accent-indigo-600" />
+                정확히 일치
+              </label>
+            </div>
+          </div>
+          <p class="text-xs text-slate-500 mt-2">URL을 입력하면 해당 URL(또는 포함 매칭) 행만 분석합니다. 비워두면 전체를 분석합니다.</p>
+        </div>
+
+        <div class="md:col-span-12 mt-1">
           <label class="block text-sm font-bold text-slate-700 mb-2">Screaming Frog Excel (.xlsx/.xls)</label>
-          <input id="file" type="file" accept=".xlsx,.xls" class="w-full p-3 border rounded-xl bg-white" />
+        </div>
+
+        <div class="md:col-span-9">
+          <input id="file" type="file" accept=".xlsx,.xls" class="w-full p-2 text-sm border rounded-xl bg-white file:mr-4 file:py-2 file:px-3 file:rounded-md file:border-0 file:bg-slate-100 file:text-slate-700 hover:file:bg-slate-200" />
           <p id="hint" class="text-xs text-slate-500 mt-2">
             권장: Internal HTML 리포트(컬럼에 Title 1 / H1-1 / Title 1 Length 등이 포함된 시트)
           </p>
         </div>
 
-        <div class="flex gap-2">
-          <button id="analyzeBtn" class="px-5 py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition">
+        <div class="md:col-span-3 flex gap-2">
+          <button id="analyzeBtn" class="flex-1 px-5 py-3 rounded-xl bg-indigo-600 text-white font-bold hover:bg-indigo-700 transition">
             분석하기
           </button>
-          <button id="resetBtn" class="px-5 py-3 rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition">
+          <button id="resetBtn" class="flex-1 px-5 py-3 rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 transition">
             초기화
           </button>
         </div>
@@ -56,7 +76,7 @@
         <div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
           <div class="text-sm font-bold text-slate-500">Rows Analyzed</div>
           <div id="rows" class="mt-2 text-4xl font-black text-slate-900">0</div>
-          <div class="mt-2 text-sm text-slate-500">엑셀 첫 번째 시트 기준</div>
+          <div class="mt-2 text-sm text-slate-500">필터 적용 후 기준</div>
         </div>
 
         <div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
@@ -92,4 +112,222 @@
         </div>
       </div>
 
-      <div class
+      <div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-lg font-extrabold text-slate-900">Sample Issues (Top 10)</h2>
+          <div class="text-xs text-slate-500">URL 컬럼이 있으면 함께 표시</div>
+        </div>
+        <div class="overflow-auto">
+          <table class="min-w-full text-sm">
+            <thead class="text-left text-slate-500">
+              <tr class="border-b">
+                <th class="py-2 pr-4">Type</th>
+                <th class="py-2 pr-4">URL</th>
+                <th class="py-2 pr-4">Value</th>
+              </tr>
+            </thead>
+            <tbody id="issuesTable" class="text-slate-800"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    const HEADER_CANDIDATES = {
+      url: ["Address", "URL"],
+      titleLen: ["Title 1 Length", "Title 1 Length (Px)", "Title 1 Length (pixels)", "Title 1 Length (Chars)", "Title 1 Length (characters)"],
+      title: ["Title 1", "Title"],
+      h1: ["H1-1", "H1 1", "H1", "H1-1 (Text)"]
+    };
+
+    function pickHeader(row0, candidates) {
+      if (!row0) return null;
+      const keys = Object.keys(row0);
+      for (const c of candidates) {
+        const exact = keys.find(k => k === c);
+        if (exact) return exact;
+      }
+      for (const c of candidates) {
+        const lower = keys.find(k => String(k).toLowerCase() === String(c).toLowerCase());
+        if (lower) return lower;
+      }
+      return null;
+    }
+
+    function toNumber(v) {
+      if (typeof v === "number") return v;
+      if (v == null) return NaN;
+      const n = Number(String(v).trim());
+      return Number.isFinite(n) ? n : NaN;
+    }
+
+    function isBlank(v) {
+      return v == null || String(v).trim() === "";
+    }
+
+    function clamp(n, min, max) {
+      return Math.max(min, Math.min(max, n));
+    }
+
+    function grade(score) {
+      if (score >= 90) return "Excellent";
+      if (score >= 75) return "Good";
+      if (score >= 60) return "Fair";
+      return "Needs Work";
+    }
+
+    function computeScore({ titleTooLong, h1Missing }) {
+      const titlePenalty = clamp(titleTooLong * 1, 0, 25);
+      const h1Penalty = clamp(h1Missing * 2, 0, 40);
+      return clamp(100 - titlePenalty - h1Penalty, 0, 100);
+    }
+
+    async function parseExcel(file) {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const sheetName = wb.SheetNames[0];
+      if (!sheetName) throw new Error("시트를 찾을 수 없습니다.");
+      const sheet = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+      return rows;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;"
+      }[c]));
+    }
+
+    function renderIssues(issues) {
+      const tbody = $("issuesTable");
+      tbody.innerHTML = "";
+      const top = issues.slice(0, 10);
+      if (top.length === 0) {
+        tbody.innerHTML = `<tr class="border-b"><td class="py-3 pr-4 text-slate-500" colspan="3">표시할 이슈가 없습니다.</td></tr>`;
+        return;
+      }
+      for (const it of top) {
+        const typeClass = it.type === "Missing H1" ? "text-red-600" : "text-amber-600";
+        const url = it.url || "-";
+        const value = it.value || "-";
+        tbody.insertAdjacentHTML("beforeend", `
+          <tr class="border-b">
+            <td class="py-3 pr-4 font-bold ${typeClass}">${it.type}</td>
+            <td class="py-3 pr-4 break-all">${escapeHtml(url)}</td>
+            <td class="py-3 pr-4">${escapeHtml(value)}</td>
+          </tr>
+        `);
+      }
+    }
+
+    $("resetBtn").addEventListener("click", () => {
+      $("file").value = "";
+      $("filterUrl").value = "";
+      $("filterExact").checked = false;
+      $("status").textContent = "";
+      $("dash").classList.add("hidden");
+      $("score").textContent = "0";
+      $("rows").textContent = "0";
+      $("titleTooLong").textContent = "0";
+      $("h1Missing").textContent = "0";
+      $("grade").textContent = "-";
+      $("titleDetail").textContent = "-";
+      $("h1Detail").textContent = "-";
+      $("issuesTable").innerHTML = "";
+    });
+
+    $("analyzeBtn").addEventListener("click", async () => {
+      const file = $("file").files?.[0];
+      if (!file) return alert("엑셀 파일을 선택해 주세요.");
+
+      $("status").textContent = "분석 중...";
+      try {
+        const allRows = await parseExcel(file);
+        if (!allRows.length) throw new Error("엑셀에 데이터가 없습니다.");
+
+        const row0 = allRows[0];
+        const hUrl = pickHeader(row0, HEADER_CANDIDATES.url);
+        const hTitleLen = pickHeader(row0, HEADER_CANDIDATES.titleLen);
+        const hTitle = pickHeader(row0, HEADER_CANDIDATES.title);
+        const hH1 = pickHeader(row0, HEADER_CANDIDATES.h1);
+
+        if (!hTitleLen && !hTitle) {
+          throw new Error("Title 길이를 계산할 컬럼을 찾지 못했습니다. (예: 'Title 1 Length' 또는 'Title 1')");
+        }
+        if (!hH1) {
+          throw new Error("H1 컬럼을 찾지 못했습니다. (예: 'H1-1')");
+        }
+
+        const filter = String($("filterUrl").value || "").trim();
+        const exact = $("filterExact").checked;
+
+        let rows = allRows;
+        if (filter) {
+          if (!hUrl) throw new Error("URL 필터를 쓰려면 엑셀에 URL 컬럼(예: 'Address')이 필요합니다.");
+          rows = allRows.filter(r => {
+            const u = String(r[hUrl] || "");
+            return exact ? (u === filter) : u.includes(filter);
+          });
+        }
+
+        if (filter && rows.length === 0) {
+          throw new Error("해당 URL로 필터링된 행이 없습니다. (정확히 일치 체크 해제/URL 확인)");
+        }
+
+        let titleTooLong = 0;
+        let h1Missing = 0;
+        const issues = [];
+
+        for (const r of rows) {
+          const url = hUrl ? r[hUrl] : null;
+
+          let titleLen = NaN;
+          if (hTitleLen) titleLen = toNumber(r[hTitleLen]);
+          if (!Number.isFinite(titleLen) && hTitle) {
+            const t = r[hTitle];
+            titleLen = isBlank(t) ? 0 : String(t).length;
+          }
+          if (Number.isFinite(titleLen) && titleLen > 60) {
+            titleTooLong++;
+            issues.push({ type: "Title > 60", url, value: `len=${titleLen}` });
+          }
+
+          const h1 = r[hH1];
+          if (isBlank(h1)) {
+            h1Missing++;
+            issues.push({ type: "Missing H1", url, value: "" });
+          }
+        }
+
+        const score = computeScore({ titleTooLong, h1Missing });
+
+        $("dash").classList.remove("hidden");
+        $("rows").textContent = String(rows.length);
+        $("titleTooLong").textContent = String(titleTooLong);
+        $("h1Missing").textContent = String(h1Missing);
+        $("score").textContent = String(score);
+        $("grade").textContent = grade(score);
+
+        $("titleDetail").textContent =
+          `>60: ${titleTooLong}건 (max -25) / source: ${hTitleLen ? hTitleLen : (hTitle || "-")}`;
+        $("h1Detail").textContent =
+          `missing: ${h1Missing}건 (max -40) / source: ${hH1}`;
+
+        renderIssues(issues);
+
+        $("status").textContent =
+          filter
+            ? `완료. URL 필터 적용됨(${exact ? "정확히 일치" : "포함"}): ${filter}`
+            : "완료. 전체 행 기준으로 계산했습니다.";
+      } catch (e) {
+        $("dash").classList.add("hidden");
+        $("status").textContent = "";
+        alert(e?.message || String(e));
+      }
+    });
+  </script>
+</body>
+</html>
