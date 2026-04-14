@@ -289,7 +289,13 @@
         }
 
         if (filter && rows.length === 0) {
-          throw new Error("해당 URL로 필터링된 행이 없습니다. (정확히 일치 체크 해제/URL 확인)");
+          // Demo mode: the demo dataset won't include arbitrary URLs.
+          // If no Excel is provided, don't hard-fail; fall back to analyzing all demo rows.
+          if (!file) {
+            rows = allRows;
+          } else {
+            throw new Error("해당 URL로 필터링된 행이 없습니다. (정확히 일치 체크 해제/URL 확인)");
+          }
         }
 
         let titleTooLong = 0;
@@ -333,10 +339,14 @@
 
         renderIssues(issues);
 
-        $("status").textContent =
-          filter
-            ? `완료. URL 필터 적용됨(${exact ? "정확히 일치" : "포함"}): ${filter}`
-            : (file ? "완료. 전체 행 기준으로 계산했습니다." : "완료. (데모 데이터) 전체 행 기준으로 계산했습니다. 엑셀을 업로드하면 실제 데이터로 분석합니다.");
+        if (filter && !file && rows === allRows) {
+          $("status").textContent = `데모 데이터에는 해당 URL이 없어 전체 데모 데이터로 분석했습니다. (입력: ${filter}) 엑셀을 업로드하면 실제 URL로 필터링됩니다.`;
+        } else {
+          $("status").textContent =
+            filter
+              ? `완료. URL 필터 적용됨(${exact ? "정확히 일치" : "포함"}): ${filter}`
+              : (file ? "완료. 전체 행 기준으로 계산했습니다." : "완료. (데모 데이터) 전체 행 기준으로 계산했습니다. 엑셀을 업로드하면 실제 데이터로 분석합니다.");
+        }
       } catch (e) {
         $("dash").classList.add("hidden");
         $("status").textContent = "";
