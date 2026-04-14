@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SEO & GEO Score Predictor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- Excel parser (SheetJS) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.19.3/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans">
+
+  <div class="max-w-4xl mx-auto py-12 px-4">
+    <header class="text-center mb-12">
+      <h1 class="text-4xl font-extrabold text-indigo-700 mb-2">SEO & GEO Score Predictor</h1>
+      <p class="text-slate-500">페이지 URL 또는 스크리밍 프로그 데이터를 분석하여 예상 노출 순위를 추정합니다.</p>
+    </header>
+
+    <div class="bg-white p-8 rounded-2xl shadow-xl border border-slate-100 mb-8">
+      <div class="flex flex-col gap-4">
+        <label class="font-bold text-lg">분석할 페이지 URL</label>
+
+        <div class="flex gap-2">
+          <input type="text" id="targetUrl" placeholder="https://example.com"
+                 class="flex-1 p-3 border rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none">
+          <button onclick="startAnalysis()"
+                  class="bg-indigo-600 text-white px-8 py-3 rounded-lg font-bold hover:bg-indigo-700 transition">
+            분석 시작
+          </button>
+        </div>
+
+        <div class="flex flex-col md:flex-row md:items-center gap-3">
+          <label class="font-bold">스크리밍 프로그 엑셀 업로드</label>
+          <div class="flex-1 flex flex-col md:flex-row gap-2">
+            <input id="screamingExcel" type="file" accept=".xlsx,.xls"
+                   class="flex-1 p-2 border rounded-lg bg-white" />
+            <button onclick="analyzeExcel()"
+                    class="bg-slate-900 text-white px-6 py-2 rounded-lg font-bold hover:bg-slate-800 transition">
+              엑셀 분석 적용
+            </button>
+          </div>
+          <p class="text-sm text-slate-400 md:ml-auto" id="excelStatus">업로드 후 “엑셀 분석 적용”을 눌러주세요.</p>
+        </div>
+
+        <p class="text-sm text-slate-400">* 엑셀에서 <code>Title 1 Length</code> 컬럼을 찾아 60자 초과 시 감점합니다.</p>
+      </div>
+    </div>
+
+    <div id="resultDashboard" class="hidden space-y-6">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="bg-white p-6 rounded-2xl shadow-lg text-center border-t-4 border-indigo-500">
+          <h3 class="text-slate-500 font-bold mb-2">SEO 종합 점수</h3>
+          <div class="text-5xl font-black text-indigo-600" id="totalScore">0</div>
+          <p class="mt-2 text-sm" id="scoreGrade">분석 중...</p>
+        </div>
+        <div class="bg-white p-6 rounded-2xl shadow-lg text-center border-t-4 border-emerald-500">
+          <h3 class="text-slate-500 font-bold mb-2">예상 노출 순위</h3>
+          <div class="text-4xl font-black text-emerald-600" id="rankEst">TOP 10</div>
+          <p class="mt-2 text-sm">KD 30 이하 키워드 기준</p>
+        </div>
+        <div class="bg-white p-6 rounded-2xl shadow-lg text-center border-t-4 border-purple-500">
+          <h3 class="text-slate-500 font-bold mb-2">GEO 인용 확률</h3>
+          <div class="text-4xl font-black text-purple-600" id="geoProb">0%</div>
+          <p class="mt-2 text-sm text-purple-400">구조화 데이터 기반</p>
+        </div>
+      </div>
+
+      <div class="bg-white p-8 rounded-2xl shadow-lg">
+        <h3 class="text-xl font-bold mb-6">항목별 상세 오딧 (Audit)</h3>
+        <ul class="space-y-4" id="auditList"></ul>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let excelInsights = {
+      loaded: false,
+      titleTooLongCount: 0,
+      titlePenalty: 0,
+      message: ''
+    };
+
+    function setExcelStatus(text) {
+      const el = document.getElementById('excelStatus');
+      if (el) el.textContent = text;
+    }
+
+    function clampScore(score) {
+      return Math.max(0, Math.min(100, score));
+    }
+
+    function gradeText(score) {
+      if (score >= 90) return "Excellent";
+      if (score >= 75) return "Good";
+      if (score >= 60) return "Fair";
+      return "Needs Work";
+    }
+
+    async function analyzeExcel() {
+      const fileInput = document.getElementById('screamingExcel');
+      const file = fileInput?.files?.[0];
+      if (!file) return alert('엑셀 파일(.xlsx/.xls)을 선택해 주세요!');
+
+      setExcelStatus('엑셀 읽는 중...');
+
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) throw new Error('시트를 찾을 수 없어요.');
+
+        const sheet = workbook.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval: null });
+
+        const colName = 'Title 1 Length';
+        if (!rows.length) throw new Error('엑셀에 데이터 행이 없어요.');
+
+        const hasCol = Object.prototype.hasOwnProperty.call(rows[0], colName)
+          || rows.some(r => Object.prototype.hasOwnProperty.call(r, colName));
+
+        if (!hasCol) {
+          excelInsights = {
+            loaded: false,
+            titleTooLongCount: 0,
+            titlePenalty: 0,
+            message: `엑셀에서 '${colName}' 컬럼을 찾지 못했습니다. (컬럼명이 정확히 일치해야 해요)`
+          };
+          setExcelStatus(excelInsights.message);
+          alert(excelInsights.message);
+          return;
+        }
+
+        let tooLong = 0;
+        for (const r of rows) {
+          const v = r[colName];
+          const n = typeof v === 'number' ? v : (v == null ? NaN : Number(String(v).trim()));
+          if (!Number.isNaN(n) && n > 60) tooLong++;
+        }
+
+        const penalty = Math.min(10, tooLong * 1);
+
+        excelInsights = {
+          loaded: true,
+          titleTooLongCount: tooLong,
+          titlePenalty: penalty,
+          message: `엑셀 적용 완료: Title 1 Length 60초과 ${tooLong}건 → 감점 -${penalty}점`
+        };
+
+        setExcelStatus(excelInsights.message);
+        alert(excelInsights.message);
+
+        const dashboardVisible = !document.getElementById('resultDashboard').classList.contains('hidden');
+        if (dashboardVisible) {
+          const current = Number(document.getElementById('totalScore').innerText || 0);
+          const adjusted = clampScore(current - penalty);
+          document.getElementById('totalScore').innerText = adjusted;
+          document.getElementById('scoreGrade').innerText = gradeText(adjusted);
+
+          const list = document.getElementById('auditList');
+          if (list) {
+            const li = document.createElement('li');
+            li.className = "flex justify-between items-center border-b pb-2";
+            li.innerHTML = `
+              <span class="font-medium text-slate-700">On-Page (Title Length)</span>
+              <span class="font-bold ${tooLong > 0 ? 'text-red-500' : 'text-emerald-600'}">
+                ${tooLong > 0 ? `Fail (${tooLong}개 URL 60초과, -${penalty}점)` : 'Pass'}
+              </span>
+            `;
+            list.prepend(li);
+          }
+        }
+      } catch (e) {
+        setExcelStatus('엑셀 분석 실패');
+        alert('엑셀 분석 중 오류가 발생했습니다: ' + (e?.message || e));
+      }
+    }
+
+    function startAnalysis() {
+      const url = document.getElementById('targetUrl').value;
+      if (!url) return alert('URL을 입력해 주세요!');
+
+      document.getElementById('resultDashboard').classList.remove('hidden');
+      document.getElementById('scoreGrade').innerText = "분석 중...";
+
+      setTimeout(() => {
+        const mockData = {
+          score: 82,
+          rank: "4 ~ 8위",
+          geo: "65%",
+          audits: [
+            { name: "Technical (Robots/Sitemap)", status: "Pass", color: "text-emerald-600" },
+            { name: "On-Page (Title/H1)", status: "Warning (H1 중복)", color: "text-amber-500" },
+            { name: "Page Speed (LCP)", status: "Needs Improvement", color: "text-red-500" },
+            { name: "Structured Data (Schema)", status: "Pass", color: "text-emerald-600" }
+          ]
+        };
+
+        const penalty = excelInsights.loaded ? excelInsights.titlePenalty : 0;
+        const adjustedScore = clampScore(mockData.score - penalty);
+
+        document.getElementById('totalScore').innerText = adjustedScore;
+        document.getElementById('rankEst').innerText = mockData.rank;
+        document.getElementById('geoProb').innerText = mockData.geo;
+        document.getElementById('scoreGrade').innerText = gradeText(adjustedScore);
+
+        const list = document.getElementById('auditList');
+
+        const excelAudit = excelInsights.loaded
+          ? [{
+              name: "On-Page (Title 1 Length > 60)",
+              status: excelInsights.titleTooLongCount > 0
+                ? `Fail (${excelInsights.titleTooLongCount}건 초과, -${excelInsights.titlePenalty}점)`
+                : "Pass",
+              color: excelInsights.titleTooLongCount > 0 ? "text-red-500" : "text-emerald-600"
+            }]
+          : [{
+              name: "Excel Upload (Screaming Frog)",
+              status: "Not Applied",
+              color: "text-slate-400"
+            }];
+
+        const mergedAudits = [...excelAudit, ...mockData.audits];
+
+        list.innerHTML = mergedAudits.map(item => `
+          <li class="flex justify-between items-center border-b pb-2">
+            <span class="font-medium text-slate-700">${item.name}</span>
+            <span class="font-bold ${item.color}">${item.status}</span>
+          </li>
+        `).join('');
+      }, 1000);
+    }
+  </script>
+</body>
+</html>
